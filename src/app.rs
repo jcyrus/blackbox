@@ -67,12 +67,15 @@ pub struct App {
     finder_selected: usize,
     pub config: AppConfig,
     pub should_quit: bool,
+    #[allow(dead_code)] // Phase 2: plugin system event bus
     pub event_tx: mpsc::Sender<Msg>,
+    #[allow(dead_code)] // Phase 2: status bar notifications
     pub notifications: VecDeque<String>,
     render_cache: RenderCache,
     last_saved_file: Option<(PathBuf, Instant)>,
     quit_confirm_armed: bool,
     quit_confirm_until: Option<Instant>,
+    #[allow(dead_code)] // Phase 2: animation tick tracking
     last_tick: Instant,
 }
 
@@ -484,10 +487,10 @@ impl App {
             self.quit_confirm_until = None;
         }
 
-        if let Some(deadline) = self.buffer.save_debounce {
-            if now >= deadline {
-                self.save_buffer()?;
-            }
+        if let Some(deadline) = self.buffer.save_debounce
+            && now >= deadline
+        {
+            self.save_buffer()?;
         }
 
         let due_inactive: Vec<PathBuf> = self
@@ -542,10 +545,10 @@ impl App {
     }
 
     fn save_all_buffers(&mut self) {
-        if let Some(path) = self.buffer.path.clone() {
-            if self.buffer.dirty || self.buffer.save_debounce.is_some() {
-                self.save_active_buffer_at_path(path);
-            }
+        if let Some(path) = self.buffer.path.clone()
+            && (self.buffer.dirty || self.buffer.save_debounce.is_some())
+        {
+            self.save_active_buffer_at_path(path);
         }
 
         let to_save: Vec<PathBuf> = self

@@ -1,8 +1,9 @@
 /// Application interaction modes.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 #[allow(dead_code)]
 pub enum Mode {
     /// Normal mode — navigation and commands.
+    #[default]
     Normal,
     /// Insert mode — text editing.
     Insert,
@@ -29,11 +30,5 @@ impl Mode {
             Mode::FinderOpen => "FINDER",
             Mode::LinkPicker => "LINK",
         }
-    }
-}
-
-impl Default for Mode {
-    fn default() -> Self {
-        Mode::Normal
     }
 }

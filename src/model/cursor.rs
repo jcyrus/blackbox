@@ -8,6 +8,7 @@ pub struct CursorState {
     /// Desired column for vertical movement ("sticky" column).
     pub desired_col: usize,
     /// Active selection range, if any.
+    #[allow(dead_code)] // Phase 2: visual selection mode
     pub selection: Option<(Position, Position)>,
 }
 
@@ -19,6 +20,7 @@ pub struct Position {
 }
 
 impl CursorState {
+    #[allow(dead_code)] // Phase 2: used for selections
     pub fn position(&self) -> Position {
         Position {
             row: self.row,
@@ -26,12 +28,14 @@ impl CursorState {
         }
     }
 
+    #[allow(dead_code)] // Phase 2: used for goto/jump commands
     pub fn move_to(&mut self, row: usize, col: usize) {
         self.row = row;
         self.col = col;
         self.desired_col = col;
     }
 
+    #[allow(dead_code)] // Phase 2: visual selection mode
     pub fn clear_selection(&mut self) {
         self.selection = None;
     }
