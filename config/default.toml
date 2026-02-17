@@ -1,0 +1,23 @@
+[general]
+vault_path = "~/notes"
+scratch_file = ".scratch.md"
+auto_save_debounce_ms = 300
+theme = "cyberpunk"
+
+[editor]
+tab_width = 4
+soft_wrap = true
+line_numbers = false
+scroll_off = 5
+
+[search]
+max_results = 50
+ignore_patterns = [".git", "node_modules", ".obsidian"]
+
+[sync]
+backend = "git"
+
+[sync.git]
+auto_commit = true
+auto_push = false
+commit_message_format = "blackbox: auto-save {timestamp}"

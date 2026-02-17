@@ -1,0 +1,63 @@
+[package]
+name = "blackbox-tui"
+version = "0.1.0"
+edition = "2024"
+authors = ["Cyrus Espiritu"]
+description = "A cyberpunk TUI knowledge base. Local first, sync second."
+license = "MIT"
+repository = "https://github.com/jcyrus/blackbox"
+keywords = ["tui", "markdown", "notes", "knowledge-base"]
+categories = ["command-line-interface"]
+
+[[bin]]
+name = "blackbox"
+path = "src/main.rs"
+
+[dependencies]
+# TUI
+ratatui = "0.29"
+crossterm = "0.28"
+
+# Text buffer
+ropey = "1.6"
+
+# Markdown & Syntax
+pulldown-cmark = "0.12"
+syntect = "5.2"
+
+# Search
+fuzzy-matcher = "0.3"
+ignore = "0.4"
+
+# Config
+serde = { version = "1.0", features = ["derive"] }
+toml = "0.8"
+directories = "5.0"
+
+# File watching
+notify = "7.0"
+
+# Data structures
+slotmap = "1.0"
+smallvec = { version = "1.13", features = ["union"] }
+
+# Error handling
+anyhow = "1.0"
+thiserror = "2.0"
+
+# Logging
+tracing = "0.1"
+tracing-appender = "0.2"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Regex (for WikiLinks)
+regex = "1.11"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+strip = true
+codegen-units = 1
+
+[profile.dev]
+opt-level = 1
