@@ -1,6 +1,6 @@
 [package]
 name = "blackbox-tui"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 authors = ["Cyrus Espiritu"]
 description = "A cyberpunk TUI knowledge base. Local first, sync second."
