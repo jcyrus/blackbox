@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::model::config::AppConfig;
 use crate::model::config::PluginConfig;
@@ -161,7 +161,7 @@ impl PluginManager {
             .map(|repo| default_plugin_base_dir().join(repo_slug(repo)))
     }
 
-    fn plugin_key(plugin: &PluginConfig, root_dir: &PathBuf) -> String {
+    fn plugin_key(plugin: &PluginConfig, root_dir: &Path) -> String {
         if let Some(repo) = plugin.repo.as_ref() {
             return format!("repo:{repo}");
         }

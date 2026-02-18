@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::plugin::manifest::{PluginId, PluginManifest};
 
@@ -68,7 +68,7 @@ impl PluginRuntime {
             .unwrap_or_else(|| self.id.0.clone())
     }
 
-    fn read_manifest(root_dir: &PathBuf) -> Result<PluginManifest, String> {
+    fn read_manifest(root_dir: &Path) -> Result<PluginManifest, String> {
         let manifest_path = root_dir.join("plugin.toml");
         let raw = fs::read_to_string(&manifest_path)
             .map_err(|err| format!("{}: {err}", manifest_path.display()))?;
