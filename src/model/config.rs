@@ -1,5 +1,6 @@
 use anyhow::{Result, anyhow};
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
@@ -10,6 +11,25 @@ pub struct AppConfig {
     pub search: SearchConfig,
     #[allow(dead_code)] // Phase 3: git sync feature
     pub sync: SyncConfig,
+    #[serde(default)]
+    pub plugins: Vec<PluginConfig>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PluginConfig {
+    #[serde(default)]
+    #[allow(dead_code)] // Phase 3: plugin git source
+    pub repo: Option<String>,
+    #[serde(default)]
+    pub path: Option<PathBuf>,
+    #[serde(default)]
+    #[allow(dead_code)] // Phase 3: plugin branch pinning
+    pub branch: Option<String>,
+    #[serde(default = "default_plugin_enabled")]
+    pub enabled: bool,
+    #[serde(default)]
+    #[allow(dead_code)] // Phase 3: plugin-specific config passed to runtime
+    pub config: HashMap<String, toml::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -96,4 +116,8 @@ impl AppConfig {
 
 fn dirs_home() -> Option<PathBuf> {
     directories::BaseDirs::new().map(|d| d.home_dir().to_path_buf())
+}
+
+fn default_plugin_enabled() -> bool {
+    true
 }

@@ -5,6 +5,53 @@ All notable changes to BlackBox will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+#### Plugin Subsystem
+
+- Plugin module scaffold: `manifest`, `permission`, `runtime`, `manager`, `installer`, `host_fns`
+- Plugin discovery via `plugin.toml` manifests in plugin root directories
+- `PluginStatus` lifecycle: `Discovered → Loaded | Error(String)` with lazy-load `.wasm` validation
+- `PluginManager` driven by `[[plugins]]` entries in app config; resolves `path` and `repo` sources
+- Startup notifications surfaced into the status bar on launch
+- `PluginConfig` added to `AppConfig` with `repo`, `path`, `branch`, `enabled`, and per-plugin `config` table
+- Optional `extism` v1.13 dependency behind the `plugins` feature flag (enabled by default) for future WASM execution
+
+#### Command Mode
+
+- `:` key in Normal mode opens a command overlay (centered popup)
+- `Esc` dismisses, `Enter` dispatches, `Backspace` edits; status bar shows live input
+- Tab-bar legend updated with `: Command (help)` hint
+
+#### Built-in Commands
+
+- `:help` — grouped output: built-in command list + discovered plugin commands from manifests
+- `:plugins` / `:pl` — summary notification (count, error count)
+- `:plugins.list` / `:pl.list` — sorted per-plugin status rows
+- `:plugins.errors` / `:pl.errors` — error details for failed plugins
+- `:plugins.reload` / `:pl.reload` — live reload of plugin manager from config
+
+#### Plugin Command Dispatch
+
+- `:plugin <cmd>` and `:p <cmd>` prefix forms forward directly to plugin executor
+- Ambiguous (multi-match) and not-found cases reported as notifications
+- Quoted argument parsing: `"..."`, `'...'`, and `\`-escape sequences stripped before dispatch
+
+#### Architecture
+
+- `Msg::PluginCommand(String)` and `Msg::PluginEvent(PluginId, PluginAction)` variants wired into `App::update()`
+- `#[allow(dead_code)]` annotations carry explicit Phase 3 scaffolding rationale comments; no blanket allowances
+- `docs/ARCHITECTURE.md` and `docs/CROSSCHECK.md` added
+
+### Changed
+
+- `known_limitations`: removed "No plugin system yet"
+- `config/default.toml`: added commented `[[plugins]]` examples
+
+---
+
 ## [0.1.0] - 2026-02-17
 
 ### Added
@@ -94,7 +141,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - No syntax highlighting for code blocks yet (planned with `syntect`)
 - No backlinks panel yet
 - No undo/redo system yet
-- No plugin system yet
 - No git-based sync yet
 
 [0.1.0]: https://github.com/jcyrus/blackbox/releases/tag/v0.1.0

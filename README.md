@@ -54,23 +54,27 @@ cargo install blackbox-tui
 
 3. **Key Shortcuts:**
 
-| Mode    | Key            | Action                        |
-| ------- | -------------- | ----------------------------- |
-| Normal  | `i`            | Enter Insert mode             |
-| Normal  | `Esc`          | Return to Normal mode         |
-| Normal  | `q`            | Quit (confirms if unsaved)    |
-| Normal  | `Q`            | Save all & quit immediately   |
-| Normal  | `Ctrl+E`       | Toggle sidebar                |
-| Normal  | `/`            | Fuzzy file finder             |
-| Normal  | `Ctrl+Shift+F` | Full-text content search      |
-| Normal  | `Ctrl+N/P`     | Next/previous buffer tab      |
-| Normal  | `Ctrl+S`       | Force save current buffer     |
-| Normal  | `hjkl`         | Cursor navigation (or arrows) |
-| Normal  | `0` / `$`      | Jump to line start / end      |
-| Sidebar | `n`            | Create new file               |
-| Sidebar | `N`            | Create new folder             |
-| Sidebar | `Enter`        | Open selected file            |
-| Insert  | `Esc`          | Return to Normal mode         |
+| Mode      | Key            | Action                             |
+| --------- | -------------- | ---------------------------------- |
+| Normal    | `i`            | Enter Insert mode                  |
+| Normal    | `Esc`          | Return to Normal mode              |
+| Normal    | `q`            | Quit (confirms if unsaved)         |
+| Normal    | `Q`            | Save all & quit immediately        |
+| Normal    | `Ctrl+E`       | Toggle sidebar                     |
+| Normal    | `/`            | Fuzzy file finder                  |
+| Normal    | `Ctrl+Shift+F` | Full-text content search           |
+| Normal    | `Ctrl+N/P`     | Next/previous buffer tab           |
+| Normal    | `Ctrl+S`       | Force save current buffer          |
+| Normal    | `gd`           | Follow `[[WikiLink]]` under cursor |
+| Normal    | `Ctrl+B`       | Toggle backlinks panel             |
+| Normal    | `hjkl`         | Cursor navigation (or arrows)      |
+| Normal    | `0` / `$`      | Jump to line start / end           |
+| Sidebar   | `n`            | Create new file                    |
+| Sidebar   | `N`            | Create new folder                  |
+| Sidebar   | `Enter`        | Open selected file                 |
+| Backlinks | `j/k`          | Navigate linking notes             |
+| Backlinks | `Enter`        | Jump to linking note               |
+| Insert    | `Esc`          | Return to Normal mode              |
 
 4. **Fuzzy Search:**
    - `/` opens the file finder
@@ -124,9 +128,9 @@ BlackBox is built on a strict **Elm Architecture (MVU)** pattern:
 - [x] Fuzzy file finder
 - [x] Content search (full-text grep)
 - [x] Inline file/folder creation from sidebar
-- [ ] `[[WikiLink]]` navigation (follow with `gd`)
-- [ ] `syntect` syntax highlighting for code blocks
-- [ ] Backlinks panel
+- [x] `[[WikiLink]]` navigation — `gd` to follow, `y/n` prompt to create missing notes
+- [x] `syntect` syntax highlighting for fenced code blocks (language-aware)
+- [x] Backlinks panel — `Ctrl+B` to toggle, shows all notes linking to current
 
 ### 🔮 Phase 3: The Ecosystem — "Extend Everything" (PLANNED)
 
@@ -183,6 +187,6 @@ If you're reading this, you're probably one of us. Welcome to the box.
 
 ---
 
-**Status:** Phase 1 complete. Phase 2 in progress. Watch this space.
+**Status:** Phase 1 complete. Phase 2 complete. Phase 3 next — watch this space.
 
 _Built with ☕ and Rust by [@jcyrus](https://github.com/jcyrus)_

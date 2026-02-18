@@ -1,6 +1,8 @@
 use crossterm::event::{KeyEvent, MouseEvent};
 use std::path::PathBuf;
 
+use crate::plugin::manifest::PluginId;
+
 /// Direction for cursor movement.
 #[derive(Debug, Clone, Copy)]
 #[allow(dead_code)]
@@ -38,7 +40,18 @@ pub enum Msg {
     FileChanged(PathBuf),
     ScratchAutoSave,
 
+    // -- Plugins
+    PluginCommand(String),
+    PluginEvent(PluginId, PluginAction),
+
     // -- System
     Tick,
     Quit,
+}
+
+#[derive(Debug, Clone)]
+#[allow(dead_code)] // Phase 3 scaffolding: plugin actions are emitted once runtime callbacks are wired.
+pub enum PluginAction {
+    Notify(String),
+    RequestRedraw,
 }

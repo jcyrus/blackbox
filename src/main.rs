@@ -1,6 +1,7 @@
 mod app;
 mod model;
 mod msg;
+mod plugin;
 
 use std::io;
 use std::path::PathBuf;

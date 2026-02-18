@@ -21,3 +21,13 @@ backend = "git"
 auto_commit = true
 auto_push = false
 commit_message_format = "blackbox: auto-save {timestamp}"
+
+# [[plugins]]
+# repo = "https://github.com/user/blackbox-word-count"
+# branch = "main"
+# enabled = true
+# config = { sample = "value" }
+
+# [[plugins]]
+# path = "~/code/blackbox-my-plugin"
+# enabled = true

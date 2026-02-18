@@ -17,6 +17,10 @@ pub enum Mode {
     FinderOpen,
     /// WikiLink autocomplete picker.
     LinkPicker,
+    /// Confirm creating a new note from WikiLink follow.
+    ConfirmCreate,
+    /// Backlinks panel navigation.
+    Backlinks,
 }
 
 impl Mode {
@@ -29,6 +33,8 @@ impl Mode {
             Mode::Command => "COMMAND",
             Mode::FinderOpen => "FINDER",
             Mode::LinkPicker => "LINK",
+            Mode::ConfirmCreate => "CONFIRM",
+            Mode::Backlinks => "BACKLINKS",
         }
     }
 }

@@ -15,12 +15,16 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use regex::Regex;
+use syntect::easy::HighlightLines;
+use syntect::highlighting::{FontStyle, Theme as SyntectTheme, ThemeSet};
+use syntect::parsing::SyntaxSet;
 
 use crate::model::buffer::Buffer;
 use crate::model::config::AppConfig;
 use crate::model::file_tree::FileTree;
 use crate::model::mode::Mode;
-use crate::msg::{Direction as MoveDir, Msg};
+use crate::msg::{Direction as MoveDir, Msg, PluginAction};
+use crate::plugin::PluginManager;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FinderMode {
@@ -32,6 +36,13 @@ enum FinderMode {
 struct FinderResult {
     path: PathBuf,
     line: Option<usize>,
+    preview: String,
+}
+
+#[derive(Debug, Clone)]
+struct BacklinkEntry {
+    path: PathBuf,
+    line: usize,
     preview: String,
 }
 
@@ -53,6 +64,16 @@ static BOLD_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\*\*[^*]+\*\*").expect("valid bold regex"));
 static ITALIC_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\*[^*\s][^*]*\*").expect("valid italic regex"));
+static SYNTAX_SET: LazyLock<SyntaxSet> = LazyLock::new(SyntaxSet::load_defaults_newlines);
+static SYNTECT_THEME: LazyLock<SyntectTheme> = LazyLock::new(|| {
+    let themes = ThemeSet::load_defaults();
+    themes
+        .themes
+        .get("base16-ocean.dark")
+        .cloned()
+        .or_else(|| themes.themes.values().next().cloned())
+        .expect("at least one syntect theme")
+});
 
 pub struct App {
     pub mode: Mode,
@@ -65,7 +86,11 @@ pub struct App {
     finder_query: String,
     finder_results: Vec<FinderResult>,
     finder_selected: usize,
+    command_input: String,
     pub config: AppConfig,
+    #[allow(dead_code)]
+    // Phase 3 scaffolding: runtime command/event dispatch will read this manager.
+    pub plugin_manager: PluginManager,
     pub should_quit: bool,
     #[allow(dead_code)] // Phase 2: plugin system event bus
     pub event_tx: mpsc::Sender<Msg>,
@@ -75,6 +100,11 @@ pub struct App {
     last_saved_file: Option<(PathBuf, Instant)>,
     quit_confirm_armed: bool,
     quit_confirm_until: Option<Instant>,
+    pending_key: Option<char>,
+    pending_create_path: Option<PathBuf>,
+    backlinks_visible: bool,
+    backlinks: Vec<BacklinkEntry>,
+    backlinks_selected: usize,
     #[allow(dead_code)] // Phase 2: animation tick tracking
     last_tick: Instant,
 }
@@ -98,6 +128,8 @@ impl App {
         };
 
         let file_tree = FileTree::new(config.vault_path())?;
+        let plugin_manager = PluginManager::new(&config);
+        let notifications = VecDeque::from(plugin_manager.startup_notifications());
 
         Ok(Self {
             mode: Mode::Normal,
@@ -110,10 +142,12 @@ impl App {
             finder_query: String::new(),
             finder_results: Vec::new(),
             finder_selected: 0,
+            command_input: String::new(),
+            plugin_manager,
             config,
             should_quit: false,
             event_tx,
-            notifications: VecDeque::new(),
+            notifications,
             render_cache: RenderCache {
                 dirty: true,
                 ..Default::default()
@@ -121,6 +155,11 @@ impl App {
             last_saved_file: None,
             quit_confirm_armed: false,
             quit_confirm_until: None,
+            pending_key: None,
+            pending_create_path: None,
+            backlinks_visible: false,
+            backlinks: Vec::new(),
+            backlinks_selected: 0,
             last_tick: Instant::now(),
         }
         .with_initial_tab())
@@ -174,6 +213,8 @@ impl App {
             Msg::SaveAllBuffers => self.save_all_buffers(),
             Msg::OpenFile(path) => self.open_file(path)?,
             Msg::FileChanged(path) => self.handle_file_changed(path)?,
+            Msg::PluginCommand(command) => self.handle_plugin_command(command),
+            Msg::PluginEvent(_plugin_id, action) => self.handle_plugin_event(action),
             Msg::Tick => self.handle_tick()?,
             Msg::Quit => self.should_quit = true,
             Msg::Resize(_w, h) => {
@@ -185,13 +226,88 @@ impl App {
         Ok(())
     }
 
+    fn handle_plugin_command(&mut self, command: String) {
+        let command = command.trim();
+        if command.is_empty() {
+            return;
+        }
+
+        let notifications = if let Some(raw_plugin_command) = command
+            .strip_prefix("plugin ")
+            .or_else(|| command.strip_prefix("p "))
+        {
+            let plugin_command = parse_plugin_command_input(raw_plugin_command);
+            if plugin_command.is_empty() {
+                vec!["usage: plugin <command> (alias: p <command>)".to_string()]
+            } else {
+                self.plugin_manager.execute_command(&plugin_command)
+            }
+        } else {
+            match command {
+                "help" => {
+                    let mut notes = vec!["built-ins:".to_string()];
+                    notes.push("  help".to_string());
+                    notes.push("  plugin <command> (alias: p <command>)".to_string());
+                    notes.push(
+                        "    examples: plugin word_count | plugin \"word count\"".to_string(),
+                    );
+                    notes.push("  plugins (alias: pl)".to_string());
+                    notes.push("  plugins.list (alias: pl.list)".to_string());
+                    notes.push("  plugins.errors (alias: pl.errors)".to_string());
+                    notes.push("  plugins.reload (alias: pl.reload)".to_string());
+                    notes.extend(self.plugin_manager.command_notifications());
+                    notes
+                }
+                "plugins" | "pl" => vec![self.plugin_manager.summary_notification()],
+                "plugins.list" | "pl.list" => self.plugin_manager.list_notifications(),
+                "plugins.errors" | "pl.errors" => {
+                    let errors = self.plugin_manager.error_notifications();
+                    if errors.is_empty() {
+                        vec!["plugins: no errors".to_string()]
+                    } else {
+                        errors
+                    }
+                }
+                "plugins.reload" | "pl.reload" => {
+                    self.plugin_manager = PluginManager::new(&self.config);
+                    let mut notes = vec!["plugins: reloaded".to_string()];
+                    notes.push(self.plugin_manager.summary_notification());
+                    notes.extend(self.plugin_manager.error_notifications());
+                    notes
+                }
+                _ => self.plugin_manager.execute_command(command),
+            }
+        };
+
+        for notification in notifications {
+            self.push_notification(notification);
+        }
+    }
+
+    fn handle_plugin_event(&mut self, action: PluginAction) {
+        match action {
+            PluginAction::Notify(message) => self.push_notification(message),
+            PluginAction::RequestRedraw => self.mark_render_dirty(),
+        }
+    }
+
+    fn push_notification(&mut self, message: String) {
+        self.notifications.push_back(message);
+        while self.notifications.len() > 8 {
+            self.notifications.pop_front();
+        }
+    }
+
     fn handle_key(&mut self, key: KeyEvent) -> Result<()> {
         match self.mode {
             Mode::Normal => self.handle_key_normal(key),
             Mode::Insert => self.handle_key_insert(key),
+            Mode::Command => self.handle_key_command(key),
             Mode::Sidebar => self.handle_key_sidebar(key),
             Mode::SidebarCreate => self.handle_key_sidebar_create(key),
             Mode::FinderOpen => self.handle_key_finder(key),
+            Mode::ConfirmCreate => self.handle_key_confirm_create(key),
+            Mode::Backlinks => self.handle_key_backlinks(key),
             _ => Ok(()),
         }
     }
@@ -200,6 +316,14 @@ impl App {
         if key.code != KeyCode::Char('q') {
             self.quit_confirm_armed = false;
             self.quit_confirm_until = None;
+        }
+
+        if self.pending_key == Some('g') {
+            self.pending_key = None;
+            if key.code == KeyCode::Char('d') {
+                self.follow_wikilink_under_cursor()?;
+                return Ok(());
+            }
         }
 
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('e') {
@@ -211,7 +335,15 @@ impl App {
             return Ok(());
         }
 
+        if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('b') {
+            self.toggle_backlinks_panel()?;
+            return Ok(());
+        }
+
         match key.code {
+            KeyCode::Char('g') if key.modifiers.is_empty() => {
+                self.pending_key = Some('g');
+            }
             KeyCode::Char('q') => {
                 let pending = self.pending_write_count();
                 if pending == 0 {
@@ -231,6 +363,11 @@ impl App {
                 self.should_quit = true;
             }
             KeyCode::Char('i') => self.mode = Mode::Insert,
+            KeyCode::Char(':') => {
+                self.mode = Mode::Command;
+                self.command_input.clear();
+                self.mark_render_dirty();
+            }
             KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.switch_tab_relative(1)?;
             }
@@ -261,6 +398,39 @@ impl App {
             }
             _ => {}
         }
+        Ok(())
+    }
+
+    fn handle_key_command(&mut self, key: KeyEvent) -> Result<()> {
+        match key.code {
+            KeyCode::Esc => {
+                self.mode = Mode::Normal;
+                self.command_input.clear();
+                self.mark_render_dirty();
+            }
+            KeyCode::Enter => {
+                let command = self.command_input.trim().to_string();
+                self.mode = Mode::Normal;
+                self.command_input.clear();
+                self.mark_render_dirty();
+
+                if !command.is_empty() {
+                    let _ = self.event_tx.send(Msg::PluginCommand(command));
+                }
+            }
+            KeyCode::Backspace => {
+                self.command_input.pop();
+                self.mark_render_dirty();
+            }
+            KeyCode::Char(ch)
+                if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT =>
+            {
+                self.command_input.push(ch);
+                self.mark_render_dirty();
+            }
+            _ => {}
+        }
+
         Ok(())
     }
 
@@ -336,6 +506,56 @@ impl App {
                         self.open_file(node.path.clone())?;
                         self.mode = Mode::Normal;
                     }
+                }
+            }
+            _ => {}
+        }
+
+        Ok(())
+    }
+
+    fn handle_key_confirm_create(&mut self, key: KeyEvent) -> Result<()> {
+        match key.code {
+            KeyCode::Char('y') | KeyCode::Char('Y') => {
+                self.confirm_create_wikilink()?;
+            }
+            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                self.pending_create_path = None;
+                self.mode = Mode::Normal;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn handle_key_backlinks(&mut self, key: KeyEvent) -> Result<()> {
+        if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('b') {
+            self.toggle_backlinks_panel()?;
+            return Ok(());
+        }
+
+        match key.code {
+            KeyCode::Esc => {
+                self.backlinks_visible = false;
+                self.mode = Mode::Normal;
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                if !self.backlinks.is_empty() {
+                    self.backlinks_selected =
+                        (self.backlinks_selected + 1).min(self.backlinks.len().saturating_sub(1));
+                }
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                self.backlinks_selected = self.backlinks_selected.saturating_sub(1);
+            }
+            KeyCode::Enter => {
+                if let Some(entry) = self.backlinks.get(self.backlinks_selected).cloned() {
+                    self.open_file(entry.path)?;
+                    let target = entry.line.saturating_sub(1);
+                    self.buffer.cursor.row = target.min(self.buffer.line_count().saturating_sub(1));
+                    self.buffer.cursor.col = 0;
+                    self.buffer.cursor.desired_col = 0;
+                    self.buffer.scroll_to_cursor();
                 }
             }
             _ => {}
@@ -643,7 +863,13 @@ impl App {
             self.save_buffer()?;
         }
 
-        self.activate_tab(path)
+        self.activate_tab(path)?;
+
+        if self.backlinks_visible {
+            self.refresh_backlinks();
+        }
+
+        Ok(())
     }
 
     fn mark_render_dirty(&mut self) {
@@ -691,8 +917,157 @@ impl App {
             self.open_tabs.push(path);
         }
 
+        if self.backlinks_visible {
+            self.refresh_backlinks();
+        }
+
         self.mark_render_dirty();
         Ok(())
+    }
+
+    fn toggle_backlinks_panel(&mut self) -> Result<()> {
+        self.backlinks_visible = !self.backlinks_visible;
+
+        if self.backlinks_visible {
+            self.refresh_backlinks();
+            self.mode = Mode::Backlinks;
+        } else {
+            self.mode = Mode::Normal;
+        }
+
+        self.mark_render_dirty();
+        self.file_tree.refresh()?;
+        Ok(())
+    }
+
+    fn refresh_backlinks(&mut self) {
+        self.backlinks.clear();
+        self.backlinks_selected = 0;
+
+        let Some(active_path) = self.buffer.path.clone() else {
+            return;
+        };
+
+        let Some(note_name) = active_path
+            .file_stem()
+            .map(|stem| stem.to_string_lossy().to_string())
+        else {
+            return;
+        };
+
+        let files = self.file_tree.all_file_paths();
+        for path in files {
+            if path.extension().and_then(|ext| ext.to_str()) != Some("md") {
+                continue;
+            }
+            if same_file_path(&path, &active_path) {
+                continue;
+            }
+
+            let Ok(contents) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+
+            for (idx, line) in contents.lines().enumerate() {
+                let has_link = WIKILINK_RE.find_iter(line).any(|m| {
+                    parse_wikilink_target(&line[m.start()..m.end()])
+                        .is_some_and(|target| target.eq_ignore_ascii_case(&note_name))
+                });
+
+                if has_link {
+                    self.backlinks.push(BacklinkEntry {
+                        path: path.clone(),
+                        line: idx + 1,
+                        preview: line.trim().to_string(),
+                    });
+                }
+            }
+        }
+
+        self.backlinks.sort_by(|a, b| {
+            a.path
+                .cmp(&b.path)
+                .then(a.line.cmp(&b.line))
+                .then(a.preview.cmp(&b.preview))
+        });
+    }
+
+    fn follow_wikilink_under_cursor(&mut self) -> Result<()> {
+        let Some(link_text) = self.wikilink_under_cursor() else {
+            self.notifications
+                .push_back("No WikiLink under cursor".to_string());
+            return Ok(());
+        };
+
+        if let Some(target) = self.resolve_wikilink_target(&link_text) {
+            self.open_file(target)?;
+            return Ok(());
+        }
+
+        let path = self.config.vault_path().join(format!("{link_text}.md"));
+        self.pending_create_path = Some(path);
+        self.mode = Mode::ConfirmCreate;
+        self.mark_render_dirty();
+        Ok(())
+    }
+
+    fn confirm_create_wikilink(&mut self) -> Result<()> {
+        let Some(path) = self.pending_create_path.take() else {
+            self.mode = Mode::Normal;
+            return Ok(());
+        };
+
+        let title = path
+            .file_stem()
+            .map(|stem| stem.to_string_lossy().to_string())
+            .unwrap_or_else(|| "Untitled".to_string());
+
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+
+        if !path.exists() {
+            std::fs::write(&path, format!("# {title}\n\n"))?;
+        }
+
+        self.mode = Mode::Normal;
+        self.file_tree.refresh()?;
+        self.open_file(path)?;
+        Ok(())
+    }
+
+    fn wikilink_under_cursor(&self) -> Option<String> {
+        let line = self.buffer.line_text(self.buffer.cursor.row)?;
+        let col = self.buffer.cursor.col;
+
+        for m in WIKILINK_RE.find_iter(&line) {
+            if col >= m.start() && col < m.end() {
+                return parse_wikilink_target(&line[m.start()..m.end()]);
+            }
+        }
+
+        None
+    }
+
+    fn resolve_wikilink_target(&self, link_text: &str) -> Option<PathBuf> {
+        let clean = sanitize_link_name(link_text);
+        if clean.is_empty() {
+            return None;
+        }
+
+        let vault = self.config.vault_path();
+        let exact = vault.join(format!("{clean}.md"));
+        if exact.exists() {
+            return Some(exact);
+        }
+
+        let expected = format!("{clean}.md").to_lowercase();
+        self.file_tree.all_file_paths().into_iter().find(|path| {
+            path.extension().and_then(|ext| ext.to_str()) == Some("md")
+                && path
+                    .file_name()
+                    .is_some_and(|name| name.to_string_lossy().to_lowercase() == expected)
+        })
     }
 
     fn open_finder(&mut self, mode: FinderMode) -> Result<()> {
@@ -817,7 +1192,21 @@ impl App {
 
         self.render_tab_bar(frame, chunks[0]);
 
-        if self.sidebar_visible {
+        let editor_area = if self.sidebar_visible && self.backlinks_visible {
+            let body = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([
+                    Constraint::Percentage(22),
+                    Constraint::Min(1),
+                    Constraint::Percentage(25),
+                ])
+                .split(chunks[1]);
+
+            self.render_sidebar(frame, body[0]);
+            self.render_editor(frame, body[1]);
+            self.render_backlinks_panel(frame, body[2]);
+            body[1]
+        } else if self.sidebar_visible {
             let body = Layout::default()
                 .direction(Direction::Horizontal)
                 .constraints([Constraint::Percentage(22), Constraint::Min(1)])
@@ -825,29 +1214,34 @@ impl App {
 
             self.render_sidebar(frame, body[0]);
             self.render_editor(frame, body[1]);
+            body[1]
+        } else if self.backlinks_visible {
+            let body = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Min(1), Constraint::Percentage(25)])
+                .split(chunks[1]);
 
-            let cursor_x = self.buffer.cursor.col as u16 + body[1].x;
-            let cursor_y =
-                (self.buffer.cursor.row - self.buffer.viewport.top_line) as u16 + body[1].y;
-            if self.mode == Mode::Insert && cursor_y < body[1].y + body[1].height {
-                frame.set_cursor_position((cursor_x, cursor_y));
-            }
+            self.render_editor(frame, body[0]);
+            self.render_backlinks_panel(frame, body[1]);
+            body[0]
         } else {
             self.render_editor(frame, chunks[1]);
+            chunks[1]
+        };
 
-            // Position the terminal cursor
-            let cursor_x = self.buffer.cursor.col as u16 + chunks[1].x;
-            let cursor_y =
-                (self.buffer.cursor.row - self.buffer.viewport.top_line) as u16 + chunks[1].y;
-            if cursor_y < chunks[1].y + chunks[1].height {
-                frame.set_cursor_position((cursor_x, cursor_y));
-            }
+        let cursor_x = self.buffer.cursor.col as u16 + editor_area.x;
+        let cursor_y =
+            (self.buffer.cursor.row - self.buffer.viewport.top_line) as u16 + editor_area.y;
+        if cursor_y < editor_area.y + editor_area.height {
+            frame.set_cursor_position((cursor_x, cursor_y));
         }
 
         self.render_status_bar(frame, chunks[2]);
 
         if self.mode == Mode::FinderOpen {
             self.render_finder_overlay(frame);
+        } else if self.mode == Mode::Command {
+            self.render_command_overlay(frame);
         }
     }
 
@@ -860,11 +1254,11 @@ impl App {
             || self.render_cache.bottom != bottom;
 
         if needs_rebuild {
-            let mut in_code_block = self.code_block_state_before_line(top);
+            let mut code_block_lang = self.code_block_lang_before_line(top);
             self.render_cache.lines = (top..bottom)
                 .map(|i| {
                     let text = self.buffer.line_text(i).unwrap_or_default();
-                    self.render_markdown_line(&text, &mut in_code_block)
+                    self.render_markdown_line(&text, &mut code_block_lang)
                 })
                 .collect();
             self.render_cache.top = top;
@@ -876,26 +1270,36 @@ impl App {
         frame.render_widget(editor, area);
     }
 
-    fn code_block_state_before_line(&self, line_index: usize) -> bool {
+    fn code_block_lang_before_line(&self, line_index: usize) -> Option<String> {
         if line_index == 0 {
-            return false;
+            return None;
         }
 
-        let mut in_code_block = false;
+        let mut code_block_lang = None;
         for i in 0..line_index {
             let text = self.buffer.line_text(i).unwrap_or_default();
-            if text.trim_start().starts_with("```") {
-                in_code_block = !in_code_block;
+            if let Some(lang) = parse_code_fence_language(&text) {
+                if code_block_lang.is_some() {
+                    code_block_lang = None;
+                } else {
+                    code_block_lang = Some(lang);
+                }
             }
         }
-        in_code_block
+        code_block_lang
     }
 
-    fn render_markdown_line(&self, text: &str, in_code_block: &mut bool) -> Line<'static> {
-        let trimmed = text.trim_start();
-
-        if trimmed.starts_with("```") {
-            *in_code_block = !*in_code_block;
+    fn render_markdown_line(
+        &self,
+        text: &str,
+        code_block_lang: &mut Option<String>,
+    ) -> Line<'static> {
+        if let Some(lang) = parse_code_fence_language(text) {
+            if code_block_lang.is_some() {
+                *code_block_lang = None;
+            } else {
+                *code_block_lang = Some(lang);
+            }
             return Line::from(Span::styled(
                 text.to_string(),
                 Style::default()
@@ -905,17 +1309,45 @@ impl App {
             ));
         }
 
-        if *in_code_block {
+        if let Some(lang) = code_block_lang.as_deref() {
+            return self.render_code_block_line(text, lang);
+        }
+
+        let base_style = self.base_markdown_style(text);
+        self.render_inline_markdown(text, base_style)
+    }
+
+    fn render_code_block_line(&self, text: &str, language: &str) -> Line<'static> {
+        let syntax = SYNTAX_SET
+            .find_syntax_by_token(language)
+            .unwrap_or_else(|| SYNTAX_SET.find_syntax_plain_text());
+        let mut highlighter = HighlightLines::new(syntax, &SYNTECT_THEME);
+
+        let highlighted = highlighter.highlight_line(text, &SYNTAX_SET);
+        let Ok(tokens) = highlighted else {
             return Line::from(Span::styled(
                 text.to_string(),
                 Style::default()
                     .fg(Color::Rgb(200, 200, 200))
                     .bg(Color::Rgb(18, 18, 28)),
             ));
-        }
+        };
 
-        let base_style = self.base_markdown_style(text);
-        self.render_inline_markdown(text, base_style)
+        let spans: Vec<Span<'static>> = tokens
+            .into_iter()
+            .map(|(style, segment)| Span::styled(segment.to_string(), syntect_to_ratatui(style)))
+            .collect();
+
+        if spans.is_empty() {
+            Line::from(Span::styled(
+                text.to_string(),
+                Style::default()
+                    .fg(Color::Rgb(200, 200, 200))
+                    .bg(Color::Rgb(18, 18, 28)),
+            ))
+        } else {
+            Line::from(spans)
+        }
     }
 
     fn base_markdown_style(&self, text: &str) -> Style {
@@ -1029,6 +1461,18 @@ impl App {
                 };
                 format!(" | {label}: {}", self.finder_query)
             }
+            Mode::Command => format!(" | :{}", self.command_input),
+            Mode::ConfirmCreate => {
+                if let Some(path) = &self.pending_create_path {
+                    let name = path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_else(|| "note.md".to_string());
+                    format!(" | create {name}? (y/n)")
+                } else {
+                    " | create note? (y/n)".to_string()
+                }
+            }
             _ => String::new(),
         };
 
@@ -1081,7 +1525,7 @@ impl App {
         }
 
         spans.push(Span::styled(
-            "  Ctrl+N/P: Tabs  Ctrl+E: Sidebar  /: Finder  Ctrl+Shift+F: Search  i: Insert  q: Confirm Quit  Q: Save+Quit ",
+            "  Ctrl+N/P: Tabs  Ctrl+E: Sidebar  Ctrl+B: Backlinks  gd: Follow Link  /: Finder  Ctrl+Shift+F: Search  : Command (help)  i: Insert  q: Confirm Quit  Q: Save+Quit ",
             Style::default()
                 .bg(Color::Rgb(20, 20, 30))
                 .fg(Color::DarkGray),
@@ -1129,6 +1573,50 @@ impl App {
             Paragraph::new(lines).style(Style::default().bg(Color::Rgb(12, 12, 18))),
             area,
         );
+    }
+
+    fn render_backlinks_panel(&self, frame: &mut Frame, area: ratatui::layout::Rect) {
+        let lines: Vec<Line> = if self.backlinks.is_empty() {
+            vec![Line::from(Span::styled(
+                "No backlinks",
+                Style::default().fg(Color::DarkGray),
+            ))]
+        } else {
+            self.backlinks
+                .iter()
+                .enumerate()
+                .map(|(idx, entry)| {
+                    let file = entry
+                        .path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_else(|| "[note]".to_string());
+                    let mut preview = entry.preview.clone();
+                    if preview.len() > 42 {
+                        preview.truncate(42);
+                        preview.push('…');
+                    }
+
+                    let label = format!("{file}:{}  {preview}", entry.line);
+                    if idx == self.backlinks_selected {
+                        Line::from(Span::styled(
+                            label,
+                            Style::default().fg(Color::Black).bg(Color::Cyan),
+                        ))
+                    } else {
+                        Line::from(Span::styled(label, Style::default().fg(Color::Gray)))
+                    }
+                })
+                .collect()
+        };
+
+        let panel = Paragraph::new(lines).block(
+            Block::default()
+                .title(" Backlinks ")
+                .borders(Borders::LEFT)
+                .style(Style::default().bg(Color::Rgb(12, 12, 18))),
+        );
+        frame.render_widget(panel, area);
     }
 
     fn render_finder_overlay(&self, frame: &mut Frame) {
@@ -1202,6 +1690,23 @@ impl App {
         let cursor_y = chunks[0].y + 1;
         frame.set_cursor_position((cursor_x, cursor_y));
     }
+
+    fn render_command_overlay(&self, frame: &mut Frame) {
+        let area = centered_rect(70, 20, frame.area());
+        frame.render_widget(Clear, area);
+
+        let prompt = Paragraph::new(format!(":{}", self.command_input)).block(
+            Block::default()
+                .title(" Command ")
+                .borders(Borders::ALL)
+                .style(Style::default().bg(Color::Rgb(15, 15, 24))),
+        );
+        frame.render_widget(prompt, area);
+
+        let cursor_x = area.x + 2 + self.command_input.len() as u16;
+        let cursor_y = area.y + 1;
+        frame.set_cursor_position((cursor_x, cursor_y));
+    }
 }
 
 fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
@@ -1222,6 +1727,47 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
             Constraint::Percentage((100 - percent_x) / 2),
         ])
         .split(popup_layout[1])[1]
+}
+
+fn parse_plugin_command_input(raw: &str) -> String {
+    let input = raw.trim();
+    if input.len() < 2 {
+        return input.to_string();
+    }
+
+    let mut chars = input.chars();
+    let Some(first) = chars.next() else {
+        return String::new();
+    };
+
+    if first != '"' && first != '\'' {
+        return input.to_string();
+    }
+
+    if !input.ends_with(first) {
+        return input.to_string();
+    }
+
+    let inner = &input[first.len_utf8()..input.len() - first.len_utf8()];
+    let mut out = String::with_capacity(inner.len());
+    let mut escaped = false;
+
+    for ch in inner.chars() {
+        if escaped {
+            out.push(ch);
+            escaped = false;
+        } else if ch == '\\' {
+            escaped = true;
+        } else {
+            out.push(ch);
+        }
+    }
+
+    if escaped {
+        out.push('\\');
+    }
+
+    out.trim().to_string()
 }
 
 fn same_file_path(a: &PathBuf, b: &PathBuf) -> bool {
@@ -1303,4 +1849,66 @@ fn next_markdown_token(text: &str, start_at: usize) -> Option<(usize, usize, Tok
         .filter_map(|(hit, priority)| hit.map(|h| (h, priority)))
         .min_by(|((sa, _, _), pa), ((sb, _, _), pb)| sa.cmp(sb).then(pa.cmp(pb)))
         .map(|(h, _)| h)
+}
+
+fn parse_code_fence_language(line: &str) -> Option<String> {
+    let trimmed = line.trim_start();
+    if !trimmed.starts_with("```") {
+        return None;
+    }
+
+    let lang = trimmed.trim_start_matches("```").trim();
+    if lang.is_empty() {
+        Some("text".to_string())
+    } else {
+        Some(lang.to_string())
+    }
+}
+
+fn parse_wikilink_target(wikilink: &str) -> Option<String> {
+    if !(wikilink.starts_with("[[") && wikilink.ends_with("]]")) {
+        return None;
+    }
+
+    let inner = &wikilink[2..wikilink.len().saturating_sub(2)];
+    let sanitized = sanitize_link_name(inner);
+    if sanitized.is_empty() {
+        None
+    } else {
+        Some(sanitized)
+    }
+}
+
+fn sanitize_link_name(raw: &str) -> String {
+    raw.split(['|', '#'])
+        .next()
+        .map(str::trim)
+        .unwrap_or_default()
+        .to_string()
+}
+
+fn syntect_to_ratatui(style: syntect::highlighting::Style) -> Style {
+    let mut rat_style = Style::default()
+        .fg(Color::Rgb(
+            style.foreground.r,
+            style.foreground.g,
+            style.foreground.b,
+        ))
+        .bg(Color::Rgb(
+            style.background.r,
+            style.background.g,
+            style.background.b,
+        ));
+
+    if style.font_style.contains(FontStyle::BOLD) {
+        rat_style = rat_style.add_modifier(Modifier::BOLD);
+    }
+    if style.font_style.contains(FontStyle::ITALIC) {
+        rat_style = rat_style.add_modifier(Modifier::ITALIC);
+    }
+    if style.font_style.contains(FontStyle::UNDERLINE) {
+        rat_style = rat_style.add_modifier(Modifier::UNDERLINED);
+    }
+
+    rat_style
 }

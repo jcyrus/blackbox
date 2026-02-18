@@ -13,6 +13,10 @@ categories = ["command-line-interface"]
 name = "blackbox"
 path = "src/main.rs"
 
+[features]
+default = ["plugins"]
+plugins = ["dep:extism"]
+
 [dependencies]
 # TUI
 ratatui = "0.29"
@@ -52,6 +56,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Regex (for WikiLinks)
 regex = "1.11"
+
+# WASM plugins
+extism = { version = "1.13", optional = true }
 
 [profile.release]
 opt-level = 3
