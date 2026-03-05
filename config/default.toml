@@ -7,7 +7,8 @@ theme = "cyberpunk"
 [editor]
 tab_width = 4
 soft_wrap = true
-line_numbers = false
+line_numbers = true
+relative_line_numbers = false
 scroll_off = 5
 
 [search]
