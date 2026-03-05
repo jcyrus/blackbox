@@ -4,9 +4,17 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g. v0.2.2)"
+        required: true
 
 permissions:
   contents: write
+
+env:
+  RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
 
 jobs:
   build-and-release:
@@ -35,6 +43,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -56,7 +66,7 @@ jobs:
         shell: bash
         run: |
           cd target/${{ matrix.target }}/release
-          tar czf ../../../blackbox-${{ github.ref_name }}-${{ matrix.artifact_suffix }}.tar.gz blackbox
+          tar czf ../../../blackbox-${{ env.RELEASE_TAG }}-${{ matrix.artifact_suffix }}.tar.gz blackbox
           cd -
 
       - name: Package (Windows)
@@ -64,15 +74,15 @@ jobs:
         shell: bash
         run: |
           cd target/${{ matrix.target }}/release
-          7z a ../../../blackbox-${{ github.ref_name }}-${{ matrix.artifact_suffix }}.zip blackbox.exe
+          7z a ../../../blackbox-${{ env.RELEASE_TAG }}-${{ matrix.artifact_suffix }}.zip blackbox.exe
           cd -
 
       - name: Generate checksums
         shell: bash
         run: |
           for file in \
-            blackbox-${{ github.ref_name }}-${{ matrix.artifact_suffix }}.tar.gz \
-            blackbox-${{ github.ref_name }}-${{ matrix.artifact_suffix }}.zip; do
+            blackbox-${{ env.RELEASE_TAG }}-${{ matrix.artifact_suffix }}.tar.gz \
+            blackbox-${{ env.RELEASE_TAG }}-${{ matrix.artifact_suffix }}.zip; do
             if [ -f "$file" ]; then
               if command -v shasum &> /dev/null; then
                 shasum -a 256 "$file" | awk '{print tolower($1) "  " $2}' > "$file.sha256"
@@ -85,11 +95,12 @@ jobs:
       - name: Upload release asset
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.RELEASE_TAG }}
           files: |
-            blackbox-${{ github.ref_name }}-${{ matrix.artifact_suffix }}.tar.gz
-            blackbox-${{ github.ref_name }}-${{ matrix.artifact_suffix }}.zip
-            blackbox-${{ github.ref_name }}-${{ matrix.artifact_suffix }}.tar.gz.sha256
-            blackbox-${{ github.ref_name }}-${{ matrix.artifact_suffix }}.zip.sha256
+            blackbox-${{ env.RELEASE_TAG }}-${{ matrix.artifact_suffix }}.tar.gz
+            blackbox-${{ env.RELEASE_TAG }}-${{ matrix.artifact_suffix }}.zip
+            blackbox-${{ env.RELEASE_TAG }}-${{ matrix.artifact_suffix }}.tar.gz.sha256
+            blackbox-${{ env.RELEASE_TAG }}-${{ matrix.artifact_suffix }}.zip.sha256
           fail_on_missing: false
 
   notify-distribution:
@@ -102,7 +113,7 @@ jobs:
           token: ${{ secrets.TAP_UPDATE_TOKEN }}
           repository: jcyrus/homebrew-tap
           event-type: update-formula
-          client-payload: '{"project": "blackbox", "version": "${{ github.ref_name }}"}'
+          client-payload: '{"project": "blackbox", "version": "${{ env.RELEASE_TAG }}"}'
 
       - name: Trigger Scoop Bucket update
         uses: peter-evans/repository-dispatch@v3
@@ -110,4 +121,4 @@ jobs:
           token: ${{ secrets.TAP_UPDATE_TOKEN }}
           repository: jcyrus/scoop-bucket
           event-type: update-manifest
-          client-payload: '{"project": "blackbox", "version": "${{ github.ref_name }}"}'
+          client-payload: '{"project": "blackbox", "version": "${{ env.RELEASE_TAG }}"}'
