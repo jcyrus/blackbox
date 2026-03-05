@@ -62,7 +62,12 @@ impl App {
             chunks[1]
         };
 
-        let cursor_x = self.buffer.cursor.col as u16 + editor_area.x;
+        let mut gutter_offset = 0;
+        if self.config.editor.line_numbers {
+            gutter_offset = self.buffer.line_count().to_string().len().max(3) as u16 + 1;
+        }
+
+        let cursor_x = self.buffer.cursor.col as u16 + editor_area.x + gutter_offset;
         let cursor_y =
             (self.buffer.cursor.row - self.buffer.viewport.top_line) as u16 + editor_area.y;
         if cursor_y < editor_area.y + editor_area.height {
