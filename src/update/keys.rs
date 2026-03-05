@@ -202,6 +202,18 @@ impl App {
             KeyCode::Char('^') => self.move_cursor(MoveDir::FirstNonWhitespace),
             KeyCode::Char('{') => self.move_cursor(MoveDir::ParagraphUp),
             KeyCode::Char('}') => self.move_cursor(MoveDir::ParagraphDown),
+            KeyCode::Char('u') if key.modifiers.is_empty() => {
+                if self.buffer.undo() {
+                    self.mark_render_dirty();
+                    self.schedule_auto_save();
+                }
+            }
+            KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                if self.buffer.redo() {
+                    self.mark_render_dirty();
+                    self.schedule_auto_save();
+                }
+            }
             KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.move_cursor(MoveDir::PageUp);
             }
@@ -263,6 +275,13 @@ impl App {
             KeyCode::Esc => self.mode = Mode::Normal,
             KeyCode::Enter => {
                 self.buffer.insert_newline();
+                self.mark_render_dirty();
+                self.schedule_auto_save();
+            }
+            KeyCode::Tab => {
+                for _ in 0..self.config.editor.tab_width {
+                    self.buffer.insert_char(' ');
+                }
                 self.mark_render_dirty();
                 self.schedule_auto_save();
             }

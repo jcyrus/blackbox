@@ -4,6 +4,29 @@ use std::time::Instant;
 
 use super::cursor::CursorState;
 
+#[derive(Debug, Clone)]
+pub struct UndoEntry {
+    pub rope: Rope,
+    pub cursor: CursorState,
+}
+
+#[derive(Debug, Clone)]
+pub struct UndoTree {
+    pub history: Vec<UndoEntry>,
+    pub redo_stack: Vec<UndoEntry>,
+    pub last_edit_time: Instant,
+}
+
+impl Default for UndoTree {
+    fn default() -> Self {
+        Self {
+            history: Vec::new(),
+            redo_stack: Vec::new(),
+            last_edit_time: Instant::now(),
+        }
+    }
+}
+
 /// Viewport state for scroll tracking.
 #[derive(Debug, Clone)]
 pub struct Viewport {
@@ -30,6 +53,7 @@ pub struct Buffer {
     pub cursor: CursorState,
     pub viewport: Viewport,
     pub save_debounce: Option<Instant>,
+    pub undo_tree: UndoTree,
 }
 
 impl Buffer {
@@ -42,6 +66,7 @@ impl Buffer {
             cursor: CursorState::default(),
             viewport: Viewport::default(),
             save_debounce: None,
+            undo_tree: UndoTree::default(),
         }
     }
 
@@ -55,7 +80,52 @@ impl Buffer {
             cursor: CursorState::default(),
             viewport: Viewport::default(),
             save_debounce: None,
+            undo_tree: UndoTree::default(),
         })
+    }
+
+    pub fn push_snapshot(&mut self) {
+        let now = Instant::now();
+        if now
+            .duration_since(self.undo_tree.last_edit_time)
+            .as_millis()
+            > 500
+        {
+            self.undo_tree.history.push(UndoEntry {
+                rope: self.rope.clone(),
+                cursor: self.cursor.clone(),
+            });
+            self.undo_tree.redo_stack.clear();
+        }
+        self.undo_tree.last_edit_time = now;
+    }
+
+    pub fn undo(&mut self) -> bool {
+        if let Some(entry) = self.undo_tree.history.pop() {
+            self.undo_tree.redo_stack.push(UndoEntry {
+                rope: self.rope.clone(),
+                cursor: self.cursor.clone(),
+            });
+            self.rope = entry.rope;
+            self.cursor = entry.cursor;
+            self.dirty = true;
+            return true;
+        }
+        false
+    }
+
+    pub fn redo(&mut self) -> bool {
+        if let Some(entry) = self.undo_tree.redo_stack.pop() {
+            self.undo_tree.history.push(UndoEntry {
+                rope: self.rope.clone(),
+                cursor: self.cursor.clone(),
+            });
+            self.rope = entry.rope;
+            self.cursor = entry.cursor;
+            self.dirty = true;
+            return true;
+        }
+        false
     }
 
     /// Total number of lines in the buffer.
@@ -81,6 +151,7 @@ impl Buffer {
 
     /// Insert a character at the cursor position.
     pub fn insert_char(&mut self, ch: char) {
+        self.push_snapshot();
         let byte_idx = self.cursor_byte_offset();
         self.rope.insert_char(byte_idx, ch);
         self.cursor.col += ch.len_utf8();
@@ -89,6 +160,7 @@ impl Buffer {
 
     /// Insert a newline at the cursor position.
     pub fn insert_newline(&mut self) {
+        self.push_snapshot();
         let byte_idx = self.cursor_byte_offset();
         self.rope.insert_char(byte_idx, '\n');
         self.cursor.row += 1;
@@ -99,6 +171,7 @@ impl Buffer {
 
     /// Delete the character before the cursor (backspace).
     pub fn delete_char_before(&mut self) {
+        self.push_snapshot();
         if self.cursor.col == 0 && self.cursor.row == 0 {
             return;
         }
@@ -133,6 +206,7 @@ impl Buffer {
     }
 
     pub fn delete_char_forward(&mut self) {
+        self.push_snapshot();
         if self.cursor.row >= self.line_count() {
             return;
         }
@@ -164,6 +238,7 @@ impl Buffer {
     }
 
     pub fn delete_line(&mut self, row: usize) {
+        self.push_snapshot();
         if row >= self.line_count() {
             return;
         }

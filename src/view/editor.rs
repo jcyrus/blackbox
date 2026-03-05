@@ -8,7 +8,7 @@ use ratatui::{
     Frame,
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::Paragraph,
+    widgets::{Paragraph, Wrap},
 };
 use syntect::easy::HighlightLines;
 
@@ -72,7 +72,10 @@ impl App {
             self.render_cache.dirty = false;
         }
 
-        let editor = Paragraph::new(self.render_cache.lines.clone());
+        let mut editor = Paragraph::new(self.render_cache.lines.clone());
+        if self.config.editor.soft_wrap {
+            editor = editor.wrap(Wrap { trim: false });
+        }
         frame.render_widget(editor, area);
     }
     pub(crate) fn code_block_lang_before_line(&self, line_index: usize) -> Option<String> {

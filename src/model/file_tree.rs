@@ -12,15 +12,16 @@ pub struct FileNode {
 }
 
 pub struct FileTree {
-    root: PathBuf,
+    pub root: PathBuf,
     pub nodes: Vec<FileNode>,
     pub selected: usize,
+    pub ignore_patterns: Vec<String>,
     expanded: HashSet<PathBuf>,
     pub create_input: String,
 }
 
 impl FileTree {
-    pub fn new(root: PathBuf) -> Result<Self> {
+    pub fn new(root: PathBuf, ignore_patterns: Vec<String>) -> Result<Self> {
         let mut expanded = HashSet::new();
         expanded.insert(root.clone());
 
@@ -28,6 +29,7 @@ impl FileTree {
             root,
             nodes: Vec::new(),
             selected: 0,
+            ignore_patterns,
             expanded,
             create_input: String::new(),
         };
@@ -66,8 +68,13 @@ impl FileTree {
     }
 
     pub fn all_file_paths(&self) -> Vec<PathBuf> {
+        let ignores = self.ignore_patterns.clone();
         WalkBuilder::new(&self.root)
             .hidden(false)
+            .filter_entry(move |entry| {
+                let s = entry.path().to_string_lossy();
+                !ignores.iter().any(|p| s.contains(p))
+            })
             .build()
             .flatten()
             .filter_map(|entry| {
@@ -185,30 +192,36 @@ impl FileTree {
     }
 
     fn push_children(&mut self, dir: PathBuf, depth: usize) -> Result<()> {
-        let mut entries: Vec<(PathBuf, bool, String)> = WalkBuilder::new(&dir)
-            .max_depth(Some(1))
-            .hidden(false)
-            .build()
-            .flatten()
-            .filter_map(|entry| {
-                let path = entry.path().to_path_buf();
-                if path == dir {
-                    return None;
+        let mut entries: Vec<(PathBuf, bool, String)> = Vec::new();
+
+        // Manual directory reading instead of WalkBuilder to easily apply string matching
+        // without worrying about WalkBuilder's closure lifetime issues in recursive functions.
+        if let Ok(rd) = std::fs::read_dir(&dir) {
+            for entry in rd.flatten() {
+                let path = entry.path();
+                let s = path.to_string_lossy();
+                if self.ignore_patterns.iter().any(|p| s.contains(p)) {
+                    continue;
                 }
 
-                let metadata = entry.metadata().ok()?;
-                let is_dir = metadata.is_dir();
-                let name = entry.file_name().to_str()?.to_string();
-                Some((path, is_dir, name))
-            })
-            .collect();
-
-        entries.sort_by(|a, b| match (a.1, b.1) {
-            (true, false) => std::cmp::Ordering::Less,
-            (false, true) => std::cmp::Ordering::Greater,
-            _ => a.2.to_lowercase().cmp(&b.2.to_lowercase()),
+                let is_dir = path.is_dir();
+                let name = path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .into_owned();
+                entries.push((path, is_dir, name));
+            }
+        }
+        entries.sort_by(|a, b| {
+            if a.1 && !b.1 {
+                std::cmp::Ordering::Less
+            } else if !a.1 && b.1 {
+                std::cmp::Ordering::Greater
+            } else {
+                a.2.to_lowercase().cmp(&b.2.to_lowercase())
+            }
         });
-
         for (path, is_dir, name) in entries {
             self.nodes.push(FileNode {
                 path: path.clone(),
@@ -238,7 +251,7 @@ mod tests {
     #[test]
     fn test_empty_vault_builds_empty_tree() {
         let tmp = make_temp_vault();
-        let tree = FileTree::new(tmp.path().to_path_buf()).unwrap();
+        let tree = FileTree::new(tmp.path().to_path_buf(), vec![]).unwrap();
         assert!(tree.nodes.is_empty(), "empty dir should produce no nodes");
         assert_eq!(tree.selected, 0);
     }
@@ -247,7 +260,7 @@ mod tests {
     fn test_tree_lists_files() {
         let tmp = make_temp_vault();
         fs::write(tmp.path().join("note.md"), "# Note").unwrap();
-        let tree = FileTree::new(tmp.path().to_path_buf()).unwrap();
+        let tree = FileTree::new(tmp.path().to_path_buf(), vec![]).unwrap();
         assert_eq!(tree.nodes.len(), 1);
         assert_eq!(tree.nodes[0].name, "note.md");
         assert!(!tree.nodes[0].is_dir);
@@ -256,7 +269,7 @@ mod tests {
     #[test]
     fn test_commit_create_file_adds_md_extension() {
         let tmp = make_temp_vault();
-        let mut tree = FileTree::new(tmp.path().to_path_buf()).unwrap();
+        let mut tree = FileTree::new(tmp.path().to_path_buf(), vec![]).unwrap();
         tree.create_input = "mynote".to_string();
         let result = tree.commit_create().unwrap();
         assert!(result.is_some());
@@ -270,7 +283,7 @@ mod tests {
     #[test]
     fn test_commit_create_folder_with_trailing_slash() {
         let tmp = make_temp_vault();
-        let mut tree = FileTree::new(tmp.path().to_path_buf()).unwrap();
+        let mut tree = FileTree::new(tmp.path().to_path_buf(), vec![]).unwrap();
         tree.create_input = "subdir/".to_string();
         let result = tree.commit_create().unwrap();
         assert!(result.is_none(), "folder creation should return None");
@@ -280,7 +293,7 @@ mod tests {
     #[test]
     fn test_commit_create_empty_input_is_noop() {
         let tmp = make_temp_vault();
-        let mut tree = FileTree::new(tmp.path().to_path_buf()).unwrap();
+        let mut tree = FileTree::new(tmp.path().to_path_buf(), vec![]).unwrap();
         tree.create_input = "   ".to_string();
         let result = tree.commit_create().unwrap();
         assert!(result.is_none());
@@ -291,7 +304,7 @@ mod tests {
         let tmp = make_temp_vault();
         fs::write(tmp.path().join("a.md"), "").unwrap();
         fs::write(tmp.path().join("b.md"), "").unwrap();
-        let mut tree = FileTree::new(tmp.path().to_path_buf()).unwrap();
+        let mut tree = FileTree::new(tmp.path().to_path_buf(), vec![]).unwrap();
         assert_eq!(tree.nodes.len(), 2);
 
         tree.move_selection(100); // way past end
@@ -306,7 +319,7 @@ mod tests {
         let tmp = make_temp_vault();
         fs::write(tmp.path().join("one.md"), "").unwrap();
         fs::write(tmp.path().join("two.md"), "").unwrap();
-        let tree = FileTree::new(tmp.path().to_path_buf()).unwrap();
+        let tree = FileTree::new(tmp.path().to_path_buf(), vec![]).unwrap();
         let paths = tree.all_file_paths();
         assert_eq!(paths.len(), 2);
     }

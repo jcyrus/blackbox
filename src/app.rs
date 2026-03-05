@@ -123,7 +123,7 @@ impl App {
             buf
         };
 
-        let file_tree = FileTree::new(config.vault_path())?;
+        let file_tree = FileTree::new(config.vault_path(), config.search.ignore_patterns.clone())?;
         let plugin_manager = PluginManager::new(&config);
         let notifications = VecDeque::from(plugin_manager.startup_notifications());
 
