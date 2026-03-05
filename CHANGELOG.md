@@ -17,6 +17,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.2.2] - 2026-03-05
+
+### Fixed
+
+- CI: fix `shasum` command not found on Windows release builds
+
+### Changed
+
+- Bumped version for clean Homebrew/Scoop release with all platforms
+
+---
+
+## [0.2.1] - 2026-03-05
+
+### Added
+
+- Undo/redo system with configurable keybindings
+- Line number gutter with configurable display
+- Which-key popup for keybinding discovery
+- Nvim-style motions (`w`, `b`, `e`, `gg`, `G`, `{`, `}`)
+- Homebrew and Scoop installation instructions
+- Release workflow with artifact checksums and distribution dispatch
+
+### Fixed
+
+- Gutter offset applied to terminal cursor when line numbers enabled
+- Clippy warnings resolved
+
+### Changed
+
+- Refactored monolith `app.rs` into modular `update/` and `view/` components
+- Config merge improvements and test coverage from audit recommendations
+
+---
+
 ## [0.2.0] - 2026-02-18
 
 ### Added
