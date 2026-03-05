@@ -36,6 +36,20 @@ cargo build --release
 ./target/release/blackbox
 ```
 
+### Homebrew (macOS / Linux)
+
+```bash
+brew tap jcyrus/tap
+brew install blackbox
+```
+
+### Scoop (Windows)
+
+```powershell
+scoop stash add jcyrus https://github.com/jcyrus/scoop-bucket.git
+scoop install blackbox
+```
+
 ### From Cargo (Coming Soon)
 
 ```bash
