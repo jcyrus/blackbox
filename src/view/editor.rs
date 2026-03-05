@@ -43,7 +43,7 @@ impl App {
                     if show_line_nums {
                         let mut num = i + 1;
                         if rel_line_nums && self.mode == Mode::Normal && !is_cursor_line {
-                            num = (i as isize - cursor_row as isize).abs() as usize;
+                            num = (i as isize - cursor_row as isize).unsigned_abs();
                         }
 
                         let gutter_style = if is_cursor_line {
