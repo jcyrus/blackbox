@@ -86,8 +86,15 @@ jobs:
             if [ -f "$file" ]; then
               if command -v shasum &> /dev/null; then
                 shasum -a 256 "$file" | awk '{print tolower($1) "  " $2}' > "$file.sha256"
-              else
+              elif command -v sha256sum &> /dev/null; then
                 sha256sum "$file" | awk '{print tolower($1) "  " $2}' > "$file.sha256"
+              elif command -v certutil.exe &> /dev/null; then
+                certutil.exe -hashfile "$file" SHA256 \
+                  | awk 'BEGIN{RS="\r\n"} /^[0-9A-Fa-f]{64}$/ {print tolower($0) "  " file}' file="$file" \
+                  > "$file.sha256"
+              else
+                echo "No SHA-256 tool available for $file" >&2
+                exit 1
               fi
             fi
           done
