@@ -68,3 +68,6 @@ codegen-units = 1
 
 [profile.dev]
 opt-level = 1
+
+[dev-dependencies]
+tempfile = "3.10"

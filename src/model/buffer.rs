@@ -163,3 +163,122 @@ impl Buffer {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn test_new_buffer_is_empty() {
+        let buf = Buffer::new();
+        assert_eq!(buf.line_count(), 1); // ropey always has at least 1 line
+        assert_eq!(buf.line_text(0), Some(String::new()));
+        assert!(!buf.dirty);
+        assert_eq!(buf.cursor.row, 0);
+        assert_eq!(buf.cursor.col, 0);
+    }
+
+    #[test]
+    fn test_insert_char_advances_col() {
+        let mut buf = Buffer::new();
+        buf.insert_char('h');
+        buf.insert_char('i');
+        assert_eq!(buf.cursor.col, 2);
+        assert!(buf.dirty);
+        assert_eq!(buf.line_text(0), Some("hi".to_string()));
+    }
+
+    #[test]
+    fn test_insert_newline_advances_row() {
+        let mut buf = Buffer::new();
+        buf.insert_char('a');
+        buf.insert_newline();
+        assert_eq!(buf.cursor.row, 1);
+        assert_eq!(buf.cursor.col, 0);
+        assert_eq!(buf.line_text(0), Some("a".to_string()));
+        assert_eq!(buf.line_text(1), Some(String::new()));
+    }
+
+    #[test]
+    fn test_delete_char_middle_of_line() {
+        let mut buf = Buffer::new();
+        buf.insert_char('a');
+        buf.insert_char('b');
+        buf.insert_char('c');
+        // cursor is now at col 3, delete 'c'
+        buf.delete_char_before();
+        assert_eq!(buf.cursor.col, 2);
+        assert_eq!(buf.line_text(0), Some("ab".to_string()));
+    }
+
+    #[test]
+    fn test_delete_at_start_of_buffer_is_noop() {
+        let mut buf = Buffer::new();
+        buf.delete_char_before(); // should do nothing
+        assert_eq!(buf.cursor.row, 0);
+        assert_eq!(buf.cursor.col, 0);
+        assert_eq!(buf.line_count(), 1);
+    }
+
+    #[test]
+    fn test_delete_at_line_start_joins_lines() {
+        let mut buf = Buffer::new();
+        buf.insert_char('a');
+        buf.insert_newline();
+        // cursor is at row=1, col=0 — backspace should join lines
+        buf.delete_char_before();
+        assert_eq!(buf.cursor.row, 0);
+        assert_eq!(buf.cursor.col, 1); // end of "a"
+        assert_eq!(buf.line_text(0), Some("a".to_string()));
+    }
+
+    #[test]
+    fn test_clamp_cursor_out_of_bounds() {
+        let mut buf = Buffer::new();
+        buf.insert_char('x');
+        // Manually put cursor way out of bounds
+        buf.cursor.row = 999;
+        buf.cursor.col = 999;
+        buf.clamp_cursor();
+        assert_eq!(buf.cursor.row, 0);
+        assert_eq!(buf.cursor.col, 1); // length of "x"
+    }
+
+    #[test]
+    fn test_scroll_to_cursor_scrolls_down() {
+        let mut buf = Buffer::new();
+        // Create 30 lines
+        for i in 0..29 {
+            buf.insert_char('a');
+            if i < 28 {
+                buf.insert_newline();
+            }
+        }
+        buf.viewport.height = 10;
+        buf.viewport.scroll_off = 2;
+        buf.viewport.top_line = 0;
+        buf.cursor.row = 28; // past the visible area
+        buf.scroll_to_cursor();
+        // top_line should have advanced to keep cursor visible
+        assert!(
+            buf.viewport.top_line > 0,
+            "viewport should have scrolled, top_line={}",
+            buf.viewport.top_line
+        );
+    }
+
+    #[test]
+    fn test_from_file_roundtrip() {
+        let content = "# Hello\n\nThis is a test note.\n";
+        let mut tmp = tempfile::NamedTempFile::new().unwrap();
+        tmp.write_all(content.as_bytes()).unwrap();
+        let path = tmp.path().to_path_buf();
+
+        let buf = Buffer::from_file(path).unwrap();
+        assert_eq!(buf.line_text(0), Some("# Hello".to_string()));
+        assert_eq!(buf.line_text(1), Some(String::new()));
+        assert_eq!(buf.line_text(2), Some("This is a test note.".to_string()));
+        assert!(!buf.dirty);
+    }
+}

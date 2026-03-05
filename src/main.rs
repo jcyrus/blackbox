@@ -24,6 +24,13 @@ use model::config::AppConfig;
 use msg::Msg;
 
 fn main() -> Result<()> {
+    // Handle --version / -V before any terminal setup
+    let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|a| a == "--version" || a == "-V") {
+        println!("blackbox {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
+
     // Initialize logging to file (never stdout)
     let log_dir = directories::ProjectDirs::from("", "", "blackbox")
         .map(|d| d.data_dir().to_path_buf())

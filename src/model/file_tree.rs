@@ -225,3 +225,89 @@ impl FileTree {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    fn make_temp_vault() -> tempfile::TempDir {
+        tempfile::TempDir::new().expect("failed to create temp dir")
+    }
+
+    #[test]
+    fn test_empty_vault_builds_empty_tree() {
+        let tmp = make_temp_vault();
+        let tree = FileTree::new(tmp.path().to_path_buf()).unwrap();
+        assert!(tree.nodes.is_empty(), "empty dir should produce no nodes");
+        assert_eq!(tree.selected, 0);
+    }
+
+    #[test]
+    fn test_tree_lists_files() {
+        let tmp = make_temp_vault();
+        fs::write(tmp.path().join("note.md"), "# Note").unwrap();
+        let tree = FileTree::new(tmp.path().to_path_buf()).unwrap();
+        assert_eq!(tree.nodes.len(), 1);
+        assert_eq!(tree.nodes[0].name, "note.md");
+        assert!(!tree.nodes[0].is_dir);
+    }
+
+    #[test]
+    fn test_commit_create_file_adds_md_extension() {
+        let tmp = make_temp_vault();
+        let mut tree = FileTree::new(tmp.path().to_path_buf()).unwrap();
+        tree.create_input = "mynote".to_string();
+        let result = tree.commit_create().unwrap();
+        assert!(result.is_some());
+        let path = result.unwrap();
+        assert_eq!(path.extension().and_then(|e| e.to_str()), Some("md"));
+        assert!(path.exists(), "file should have been created");
+        let content = fs::read_to_string(&path).unwrap();
+        assert!(content.starts_with("# "), "file should start with heading");
+    }
+
+    #[test]
+    fn test_commit_create_folder_with_trailing_slash() {
+        let tmp = make_temp_vault();
+        let mut tree = FileTree::new(tmp.path().to_path_buf()).unwrap();
+        tree.create_input = "subdir/".to_string();
+        let result = tree.commit_create().unwrap();
+        assert!(result.is_none(), "folder creation should return None");
+        assert!(tmp.path().join("subdir").is_dir());
+    }
+
+    #[test]
+    fn test_commit_create_empty_input_is_noop() {
+        let tmp = make_temp_vault();
+        let mut tree = FileTree::new(tmp.path().to_path_buf()).unwrap();
+        tree.create_input = "   ".to_string();
+        let result = tree.commit_create().unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_move_selection_clamps_to_bounds() {
+        let tmp = make_temp_vault();
+        fs::write(tmp.path().join("a.md"), "").unwrap();
+        fs::write(tmp.path().join("b.md"), "").unwrap();
+        let mut tree = FileTree::new(tmp.path().to_path_buf()).unwrap();
+        assert_eq!(tree.nodes.len(), 2);
+
+        tree.move_selection(100); // way past end
+        assert_eq!(tree.selected, 1);
+
+        tree.move_selection(-100); // way before start
+        assert_eq!(tree.selected, 0);
+    }
+
+    #[test]
+    fn test_all_file_paths_finds_all_files() {
+        let tmp = make_temp_vault();
+        fs::write(tmp.path().join("one.md"), "").unwrap();
+        fs::write(tmp.path().join("two.md"), "").unwrap();
+        let tree = FileTree::new(tmp.path().to_path_buf()).unwrap();
+        let paths = tree.all_file_paths();
+        assert_eq!(paths.len(), 2);
+    }
+}

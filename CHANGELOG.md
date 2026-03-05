@@ -5,9 +5,29 @@ All notable changes to BlackBox will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Planned (Phase 3)
+
+- WASM plugin system (extism runtime)
+- Git-based vault sync
+- Undo tree visualization
+- Plugin keybinding registration
+- crates.io publish
+
+---
+
 ## [0.2.0] - 2026-02-18
 
 ### Added
+
+#### Navigation & Knowledge Graph
+
+- `[[WikiLink]]` navigation — `gd` to follow links, `y/n` prompt to create missing notes
+- `syntect` syntax highlighting for fenced code blocks (language-aware)
+- **Backlinks panel** — `Ctrl+B` to toggle; shows all vault notes linking to the current note; `j/k` + `Enter` to jump
+- Inline file creation from sidebar — `n` key in Sidebar mode
+- Inline folder creation from sidebar — `N` key in Sidebar mode
 
 #### Plugin Subsystem
 
@@ -32,12 +52,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `:plugins.list` / `:pl.list` — sorted per-plugin status rows
 - `:plugins.errors` / `:pl.errors` — error details for failed plugins
 - `:plugins.reload` / `:pl.reload` — live reload of plugin manager from config
-
-#### Plugin Command Dispatch
-
-- `:plugin <cmd>` and `:p <cmd>` prefix forms forward directly to plugin executor
-- Ambiguous (multi-match) and not-found cases reported as notifications
-- Quoted argument parsing: `"..."`, `'...'`, and `\`-escape sequences stripped before dispatch
 
 #### Architecture
 
@@ -79,8 +93,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - File tree sidebar with recursive directory navigation
 - Toggle sidebar visibility with `Ctrl+E`
 - Open files with `Enter` in sidebar
-- Create new files inline with `n` key in sidebar
-- Create new folders inline with `N` key in sidebar
 - File system watching with `notify` crate for external change detection
 - Auto-reload buffers when files change externally
 
@@ -102,7 +114,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Configuration
 
-- TOML-based configuration system
+- TOML-based configuration system with deep merge (user config layers over defaults)
 - XDG-compliant config paths (`~/.config/blackbox/`)
 - Configurable vault path (default: `~/.blackbox/`)
 - Configurable theme colors for markdown elements
@@ -135,13 +147,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Binary size: ~3-4MB (release build, stripped)
 - Target startup time: <100ms on modern hardware
 
-### Known Limitations
+---
 
-- WikiLink navigation (`gd` to follow links) not yet implemented
-- No syntax highlighting for code blocks yet (planned with `syntect`)
-- No backlinks panel yet
-- No undo/redo system yet
-- No git-based sync yet
-
+[Unreleased]: https://github.com/jcyrus/blackbox/compare/v0.2.0...HEAD
 [0.2.0]: https://github.com/jcyrus/blackbox/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/jcyrus/blackbox/releases/tag/v0.1.0

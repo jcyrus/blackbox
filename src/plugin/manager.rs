@@ -209,3 +209,63 @@ fn expand_tilde(path: &std::path::Path) -> PathBuf {
 
     path.to_path_buf()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::config::AppConfig;
+
+    fn config_with_no_plugins() -> AppConfig {
+        let defaults = include_str!("../../config/default.toml");
+        toml::from_str(defaults).expect("defaults should parse")
+    }
+
+    #[test]
+    fn test_no_plugins_configured() {
+        let config = config_with_no_plugins();
+        let manager = PluginManager::new(&config);
+        assert_eq!(manager.plugin_count(), 0);
+        assert_eq!(manager.error_count(), 0);
+        // startup_notifications should be empty when no plugins are configured
+        assert!(manager.startup_notifications().is_empty());
+    }
+
+    #[test]
+    fn test_execute_unknown_command_returns_not_found() {
+        let config = config_with_no_plugins();
+        let mut manager = PluginManager::new(&config);
+        let result = manager.execute_command("nonexistent:command");
+        assert_eq!(result.len(), 1);
+        assert!(
+            result[0].contains("not found"),
+            "expected 'not found' in: {}",
+            result[0]
+        );
+    }
+
+    #[test]
+    fn test_list_notifications_no_plugins() {
+        let config = config_with_no_plugins();
+        let manager = PluginManager::new(&config);
+        let rows = manager.list_notifications();
+        assert_eq!(rows, vec!["plugins: none configured"]);
+    }
+
+    #[test]
+    fn test_command_notifications_no_plugins() {
+        let config = config_with_no_plugins();
+        let manager = PluginManager::new(&config);
+        let rows = manager.command_notifications();
+        assert_eq!(rows, vec!["plugin commands: none discovered"]);
+    }
+
+    #[test]
+    fn test_repo_slug_extracts_name() {
+        assert_eq!(repo_slug("https://github.com/user/my-plugin"), "my-plugin");
+        assert_eq!(
+            repo_slug("https://github.com/user/my-plugin.git"),
+            "my-plugin"
+        );
+        assert_eq!(repo_slug("https://github.com/user/plugin/"), "plugin");
+    }
+}

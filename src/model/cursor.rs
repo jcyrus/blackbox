@@ -40,3 +40,43 @@ impl CursorState {
         self.selection = None;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_default_cursor() {
+        let c = CursorState::default();
+        assert_eq!(c.row, 0);
+        assert_eq!(c.col, 0);
+        assert_eq!(c.desired_col, 0);
+        assert!(c.selection.is_none());
+    }
+
+    #[test]
+    fn test_move_to_sets_all_fields() {
+        let mut c = CursorState::default();
+        c.move_to(5, 12);
+        assert_eq!(c.row, 5);
+        assert_eq!(c.col, 12);
+        assert_eq!(c.desired_col, 12);
+    }
+
+    #[test]
+    fn test_position_reflects_cursor() {
+        let mut c = CursorState::default();
+        c.move_to(3, 7);
+        let pos = c.position();
+        assert_eq!(pos.row, 3);
+        assert_eq!(pos.col, 7);
+    }
+
+    #[test]
+    fn test_clear_selection() {
+        let mut c = CursorState::default();
+        c.selection = Some((Position { row: 0, col: 0 }, Position { row: 1, col: 5 }));
+        c.clear_selection();
+        assert!(c.selection.is_none());
+    }
+}
