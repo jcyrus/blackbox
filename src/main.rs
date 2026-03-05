@@ -2,6 +2,8 @@ mod app;
 mod model;
 mod msg;
 mod plugin;
+mod update;
+mod view;
 
 use std::io;
 use std::path::PathBuf;
