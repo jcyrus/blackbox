@@ -1,8 +1,9 @@
 use crate::app::App;
 use crate::app::{
-    SYNTAX_SET, SYNTECT_THEME, TokenKind,
-    next_markdown_token, parse_code_fence_language, syntect_to_ratatui,
+    SYNTAX_SET, SYNTECT_THEME, TokenKind, next_markdown_token, parse_code_fence_language,
+    syntect_to_ratatui,
 };
+use crate::model::mode::Mode;
 use ratatui::{
     Frame,
     style::{Color, Modifier, Style},
@@ -22,10 +23,48 @@ impl App {
 
         if needs_rebuild {
             let mut code_block_lang = self.code_block_lang_before_line(top);
+
+            let highlight_cursor = self.mode == Mode::Normal
+                || self.mode == Mode::Sidebar
+                || self.mode == Mode::Command
+                || self.mode == Mode::Backlinks
+                || self.mode == Mode::FinderOpen;
+            let show_line_nums = self.config.editor.line_numbers;
+            let rel_line_nums = self.config.editor.relative_line_numbers;
+            let cursor_row = self.buffer.cursor.row;
+            let gutter_width = self.buffer.line_count().to_string().len().max(3);
+
             self.render_cache.lines = (top..bottom)
                 .map(|i| {
                     let text = self.buffer.line_text(i).unwrap_or_default();
-                    self.render_markdown_line(&text, &mut code_block_lang)
+                    let mut spans = self.render_markdown_line(&text, &mut code_block_lang);
+                    let is_cursor_line = i == cursor_row;
+
+                    if show_line_nums {
+                        let mut num = i + 1;
+                        if rel_line_nums && self.mode == Mode::Normal && !is_cursor_line {
+                            num = (i as isize - cursor_row as isize).abs() as usize;
+                        }
+
+                        let gutter_style = if is_cursor_line {
+                            Style::default()
+                                .fg(Color::Yellow)
+                                .add_modifier(Modifier::BOLD)
+                        } else {
+                            Style::default().fg(Color::DarkGray)
+                        };
+
+                        let gutter_text = format!("{:>width$} ", num, width = gutter_width);
+                        spans.insert(0, Span::styled(gutter_text, gutter_style));
+                    }
+
+                    if is_cursor_line && highlight_cursor {
+                        for span in spans.iter_mut() {
+                            span.style = span.style.bg(Color::Rgb(30, 30, 45));
+                        }
+                    }
+
+                    Line::from(spans)
                 })
                 .collect();
             self.render_cache.top = top;
@@ -58,20 +97,20 @@ impl App {
         &self,
         text: &str,
         code_block_lang: &mut Option<String>,
-    ) -> Line<'static> {
+    ) -> Vec<Span<'static>> {
         if let Some(lang) = parse_code_fence_language(text) {
             if code_block_lang.is_some() {
                 *code_block_lang = None;
             } else {
                 *code_block_lang = Some(lang);
             }
-            return Line::from(Span::styled(
+            return vec![Span::styled(
                 text.to_string(),
                 Style::default()
                     .fg(Color::Rgb(180, 180, 200))
                     .bg(Color::Rgb(25, 25, 42))
                     .add_modifier(Modifier::BOLD),
-            ));
+            )];
         }
 
         if let Some(lang) = code_block_lang.as_deref() {
@@ -81,7 +120,7 @@ impl App {
         let base_style = self.base_markdown_style(text);
         self.render_inline_markdown(text, base_style)
     }
-    pub(crate) fn render_code_block_line(&self, text: &str, language: &str) -> Line<'static> {
+    pub(crate) fn render_code_block_line(&self, text: &str, language: &str) -> Vec<Span<'static>> {
         let syntax = SYNTAX_SET
             .find_syntax_by_token(language)
             .unwrap_or_else(|| SYNTAX_SET.find_syntax_plain_text());
@@ -89,12 +128,12 @@ impl App {
 
         let highlighted = highlighter.highlight_line(text, &SYNTAX_SET);
         let Ok(tokens) = highlighted else {
-            return Line::from(Span::styled(
+            return vec![Span::styled(
                 text.to_string(),
                 Style::default()
                     .fg(Color::Rgb(200, 200, 200))
                     .bg(Color::Rgb(18, 18, 28)),
-            ));
+            )];
         };
 
         let spans: Vec<Span<'static>> = tokens
@@ -103,14 +142,14 @@ impl App {
             .collect();
 
         if spans.is_empty() {
-            Line::from(Span::styled(
+            vec![Span::styled(
                 text.to_string(),
                 Style::default()
                     .fg(Color::Rgb(200, 200, 200))
                     .bg(Color::Rgb(18, 18, 28)),
-            ))
+            )]
         } else {
-            Line::from(spans)
+            spans
         }
     }
     pub(crate) fn base_markdown_style(&self, text: &str) -> Style {
@@ -142,7 +181,11 @@ impl App {
 
         Style::default().fg(Color::Gray)
     }
-    pub(crate) fn render_inline_markdown(&self, text: &str, base_style: Style) -> Line<'static> {
+    pub(crate) fn render_inline_markdown(
+        &self,
+        text: &str,
+        base_style: Style,
+    ) -> Vec<Span<'static>> {
         let mut spans: Vec<Span<'static>> = Vec::new();
         let mut cursor = 0;
 
@@ -179,9 +222,9 @@ impl App {
         }
 
         if spans.is_empty() {
-            Line::from(Span::styled(text.to_string(), base_style))
+            vec![Span::styled(text.to_string(), base_style)]
         } else {
-            Line::from(spans)
+            spans
         }
     }
 }

@@ -76,5 +76,15 @@ impl App {
         } else if self.mode == Mode::Command {
             self.render_command_overlay(frame);
         }
+
+        if let Some(ch) = self.pending_key {
+            if ch == ' ' {
+                if let Some(since) = self.pending_key_since {
+                    if since.elapsed() > std::time::Duration::from_millis(300) {
+                        self.render_which_key(frame);
+                    }
+                }
+            }
+        }
     }
 }

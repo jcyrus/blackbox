@@ -25,10 +25,65 @@ impl App {
             self.quit_confirm_until = None;
         }
 
+        if self.pending_key == Some(' ') {
+            self.pending_key = None;
+            self.pending_key_since = None;
+            self.mark_render_dirty();
+
+            match key.code {
+                KeyCode::Char('f') => self.open_finder(FinderMode::Files)?,
+                KeyCode::Char('g') => self.open_finder(FinderMode::Content)?,
+                KeyCode::Char('e') => {
+                    self.sidebar_visible = !self.sidebar_visible;
+                    if self.sidebar_visible {
+                        self.file_tree.refresh()?;
+                        self.mode = Mode::Sidebar;
+                    }
+                }
+                KeyCode::Char('b') => self.toggle_backlinks_panel()?,
+                KeyCode::Char('n') => {
+                    self.file_tree.begin_create();
+                    self.sidebar_visible = true;
+                    self.mode = Mode::SidebarCreate;
+                }
+                KeyCode::Char('p') => {
+                    self.mode = Mode::Command;
+                    self.command_input.clear();
+                    self.command_input.push_str("plugins");
+                    self.mark_render_dirty();
+                }
+                KeyCode::Char('h') => {
+                    let _ = self.event_tx.send(Msg::PluginCommand("help".to_string()));
+                }
+                _ => {}
+            }
+            return Ok(());
+        }
+
         if self.pending_key == Some('g') {
             self.pending_key = None;
             if key.code == KeyCode::Char('d') {
                 self.follow_wikilink_under_cursor()?;
+                return Ok(());
+            } else if key.code == KeyCode::Char('g') {
+                self.move_cursor(MoveDir::Top);
+                return Ok(());
+            } else if key.code == KeyCode::Char('t') {
+                self.switch_tab_relative(1)?;
+                return Ok(());
+            } else if key.code == KeyCode::Char('T') {
+                self.switch_tab_relative(-1)?;
+                return Ok(());
+            }
+        }
+
+        if self.pending_key == Some('d') {
+            self.pending_key = None;
+            if key.code == KeyCode::Char('d') {
+                self.buffer.delete_line(self.buffer.cursor.row);
+                self.buffer.clamp_cursor();
+                self.mark_render_dirty();
+                self.schedule_auto_save();
                 return Ok(());
             }
         }
@@ -48,8 +103,15 @@ impl App {
         }
 
         match key.code {
+            KeyCode::Char(' ') if key.modifiers.is_empty() => {
+                self.pending_key = Some(' ');
+                self.pending_key_since = Some(Instant::now());
+            }
             KeyCode::Char('g') if key.modifiers.is_empty() => {
                 self.pending_key = Some('g');
+            }
+            KeyCode::Char('d') if key.modifiers.is_empty() => {
+                self.pending_key = Some('d');
             }
             KeyCode::Char('q') => {
                 let pending = self.pending_write_count();
@@ -69,7 +131,41 @@ impl App {
                 self.save_all_buffers();
                 self.should_quit = true;
             }
+            // Basic insert
             KeyCode::Char('i') => self.mode = Mode::Insert,
+            // Insert variants
+            KeyCode::Char('a') => {
+                self.move_cursor(MoveDir::Right);
+                self.mode = Mode::Insert;
+            }
+            KeyCode::Char('A') => {
+                self.move_cursor(MoveDir::LineEnd);
+                self.mode = Mode::Insert;
+            }
+            KeyCode::Char('I') => {
+                self.move_cursor(MoveDir::FirstNonWhitespace);
+                self.mode = Mode::Insert;
+            }
+            KeyCode::Char('o') => {
+                self.move_cursor(MoveDir::LineEnd);
+                self.buffer.insert_newline();
+                self.mode = Mode::Insert;
+                self.mark_render_dirty();
+                self.schedule_auto_save();
+            }
+            KeyCode::Char('O') => {
+                self.move_cursor(MoveDir::LineStart);
+                self.buffer.insert_newline();
+                self.move_cursor(MoveDir::Up);
+                self.mode = Mode::Insert;
+                self.mark_render_dirty();
+                self.schedule_auto_save();
+            }
+            KeyCode::Char('x') => {
+                self.buffer.delete_char_forward();
+                self.mark_render_dirty();
+                self.schedule_auto_save();
+            }
             KeyCode::Char(':') => {
                 self.mode = Mode::Command;
                 self.command_input.clear();
@@ -94,10 +190,24 @@ impl App {
             {
                 self.open_finder(FinderMode::Content)?;
             }
+            // Motions
             KeyCode::Char('h') | KeyCode::Left => self.move_cursor(MoveDir::Left),
             KeyCode::Char('j') | KeyCode::Down => self.move_cursor(MoveDir::Down),
             KeyCode::Char('k') | KeyCode::Up => self.move_cursor(MoveDir::Up),
             KeyCode::Char('l') | KeyCode::Right => self.move_cursor(MoveDir::Right),
+            KeyCode::Char('w') => self.move_cursor(MoveDir::WordForward),
+            KeyCode::Char('b') => self.move_cursor(MoveDir::WordBackward),
+            KeyCode::Char('e') => self.move_cursor(MoveDir::WordEnd),
+            KeyCode::Char('G') => self.move_cursor(MoveDir::Bottom),
+            KeyCode::Char('^') => self.move_cursor(MoveDir::FirstNonWhitespace),
+            KeyCode::Char('{') => self.move_cursor(MoveDir::ParagraphUp),
+            KeyCode::Char('}') => self.move_cursor(MoveDir::ParagraphDown),
+            KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.move_cursor(MoveDir::PageUp);
+            }
+            KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.move_cursor(MoveDir::PageDown);
+            }
             KeyCode::Char('0') => self.move_cursor(MoveDir::LineStart),
             KeyCode::Char('$') => self.move_cursor(MoveDir::LineEnd),
             KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -314,13 +424,13 @@ impl App {
                 self.finder_results.clear();
                 self.finder_selected = 0;
             }
-            KeyCode::Char('j') | KeyCode::Down => {
+            KeyCode::Char('j') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 if !self.finder_results.is_empty() {
                     self.finder_selected =
                         (self.finder_selected + 1).min(self.finder_results.len() - 1);
                 }
             }
-            KeyCode::Char('k') | KeyCode::Up => {
+            KeyCode::Char('k') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 if !self.finder_results.is_empty() {
                     self.finder_selected = self.finder_selected.saturating_sub(1);
                 }

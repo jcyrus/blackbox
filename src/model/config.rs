@@ -49,6 +49,8 @@ pub struct EditorConfig {
     pub soft_wrap: bool,
     #[allow(dead_code)] // Phase 3: line numbers gutter
     pub line_numbers: bool,
+    #[allow(dead_code)]
+    pub relative_line_numbers: bool,
     pub scroll_off: u16,
 }
 

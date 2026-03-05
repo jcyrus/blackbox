@@ -13,6 +13,16 @@ pub enum Direction {
     Right,
     LineStart,
     LineEnd,
+    FirstNonWhitespace,
+    WordForward,
+    WordBackward,
+    WordEnd,
+    Top,
+    Bottom,
+    ParagraphUp,
+    ParagraphDown,
+    PageUp,
+    PageDown,
 }
 
 /// All possible messages that drive state transitions.

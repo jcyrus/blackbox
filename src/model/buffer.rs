@@ -132,6 +132,61 @@ impl Buffer {
         self.dirty = true;
     }
 
+    pub fn delete_char_forward(&mut self) {
+        if self.cursor.row >= self.line_count() {
+            return;
+        }
+        let line_len = self
+            .line_text(self.cursor.row)
+            .map(|l| l.len())
+            .unwrap_or(0);
+
+        if self.cursor.col >= line_len {
+            if self.cursor.row < self.line_count().saturating_sub(1) {
+                // delete the newline at end of current line
+                let byte_idx = self.cursor_byte_offset();
+                self.rope.remove(byte_idx..byte_idx + 1);
+            }
+        } else {
+            let byte_idx = self.cursor_byte_offset();
+            // Find the next character boundary
+            let next_char_len = self
+                .rope
+                .byte_slice(byte_idx..)
+                .chars()
+                .next()
+                .map(|c| c.len_utf8())
+                .unwrap_or(1);
+            self.rope.remove(byte_idx..byte_idx + next_char_len);
+        }
+
+        self.dirty = true;
+    }
+
+    pub fn delete_line(&mut self, row: usize) {
+        if row >= self.line_count() {
+            return;
+        }
+        let start_idx = self.rope.line_to_byte(row);
+        let end_idx = if row + 1 < self.line_count() {
+            self.rope.line_to_byte(row + 1)
+        } else {
+            self.rope.len_bytes()
+        };
+
+        if start_idx < self.rope.len_bytes() {
+            self.rope.remove(start_idx..end_idx);
+        }
+
+        // Let cursor be clamped automatically or explicitly later
+        if self.cursor.row > 0 && self.cursor.row >= self.line_count() {
+            self.cursor.row -= 1;
+        }
+        self.cursor.col = 0;
+        self.cursor.desired_col = 0;
+        self.dirty = true;
+    }
+
     /// Compute the byte offset in the rope for the current cursor position.
     fn cursor_byte_offset(&self) -> usize {
         let line_start = self.rope.line_to_byte(self.cursor.row);
@@ -161,6 +216,17 @@ impl Buffer {
         if self.cursor.row >= self.viewport.top_line + height - off {
             self.viewport.top_line = self.cursor.row + off + 1 - height;
         }
+    }
+
+    /// Count the total number of words in the buffer.
+    pub fn word_count(&self) -> usize {
+        let mut count = 0;
+        for i in 0..self.line_count() {
+            if let Some(text) = self.line_text(i) {
+                count += text.split_whitespace().count();
+            }
+        }
+        count
     }
 }
 
